@@ -4,3 +4,9 @@ input
 code/pths
 !.github
 !.gitignore
+
+#wandb, PTH 무시 
+wandb 
+__pycache__
+nohup.out
+trained_models
