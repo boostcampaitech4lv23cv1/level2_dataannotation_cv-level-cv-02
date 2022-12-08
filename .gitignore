@@ -6,3 +6,9 @@ code/trained_models
 code/__pycache__
 !.github
 !.gitignore
+
+#wandb, PTH 무시 
+wandb 
+__pycache__
+nohup.out
+trained_models
