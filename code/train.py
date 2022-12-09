@@ -28,6 +28,9 @@ from torch.utils.data import ConcatDataset
 from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from utils import make_wandb_table
 
+from deteval import calc_deteval_metrics
+from detect import get_bboxes, detect
+
 INFERENCE_SHAPE = 1024
 
 #####################################
@@ -91,11 +94,11 @@ def parse_args():
 
     parser.add_argument('--image_size', type=int, default=1024)
     parser.add_argument('--input_size', type=int, default=512)
-    parser.add_argument('--batch_size', type=int, default=12)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
-    parser.add_argument('--save_interval', type=int, default=1)
+    parser.add_argument('--save_interval', type=int, default=30)
 
     parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
     parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
@@ -224,8 +227,8 @@ def do_training(data_dir, model_dir,
             val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
         wandb.log({"Val_loss" : val_loss})
+        
         # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
-
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
             eval_num_batches = len(val_dataset)
@@ -266,20 +269,32 @@ def do_training(data_dir, model_dir,
         #끝났으니 다시 원래대로
         model.train()
 
-        #save last.pth
+        #save interval
         if (epoch + 1) % save_interval == 0:
             if not osp.exists(model_dir):
                 os.makedirs(model_dir)
 
-            ckpt_fpath = osp.join(model_dir, f'camper_icdar17_epoch_{epoch+1}.pth')
+            ckpt_fpath = osp.join(model_dir, f'epoch_{epoch+1}.pth')
+            torch.save(model.state_dict(), ckpt_fpath)
+
+        #save lastest.pth
+        if epoch >= 0:
+            if not osp.exists(model_dir):
+                os.makedirs(model_dir)
+
+            ckpt_fpath = osp.join(model_dir, 'lastest.pth')
             torch.save(model.state_dict(), ckpt_fpath)
         
         #save first loss
         if epoch == 0 : 
             best_loss = val_loss 
 
+        #initial count
+        if epoch <= start_early_stopping :
+            stopping_count = 0
+
         #save best.pth
-        if epoch >= start_early_stopping :
+        if epoch >= 0 :
             if val_loss < best_loss :
                 if not osp.exists(model_dir):
                     os.makedirs(model_dir)
@@ -298,9 +313,10 @@ def do_training(data_dir, model_dir,
                 stopping_count += 1
 
                 #early stopping
-                if stopping_count == early_stopping_patience :
-                    print("----- Stop train in {}epoch -----".format(epoch+1))
-                    break
+                if epoch >= start_early_stopping:
+                    if stopping_count == early_stopping_patience :
+                        print("----- Stop train in {}epoch -----".format(epoch+1))
+                        break
 
 
 def main(args):
@@ -309,4 +325,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    print("args:", args)
     main(args)
