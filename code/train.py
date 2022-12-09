@@ -313,7 +313,7 @@ def do_training(data_dir, model_dir,
             best_loss = val_loss 
 
         #initial count
-        if epoch == start_early_stopping :
+        if epoch <= start_early_stopping :
             stopping_count = 0
 
         #save best.pth
