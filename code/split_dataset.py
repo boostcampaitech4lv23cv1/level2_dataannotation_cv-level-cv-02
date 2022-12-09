@@ -25,7 +25,7 @@ def parse_args():
 
     # Conventional args
     parser.add_argument('--data_name', type=str, default="nothing")
-    parser.add_argument('--split_ratio', type=float, default="0.8")   #split ratio
+    parser.add_argument('--split_ratio', type=float, default=0.8)   #split ratio
     
     args = parser.parse_args()
     return args
@@ -88,8 +88,9 @@ OUTPUT_PATH = f"../input/data/{data_name}/ufo/random_split"
 def main():
     print(f"선택하신 dataset은 {data_name}입니다.")
     data = get_full_json(DATASET_PATH)
-    random_split_dataset(data, OUTPUT_PATH, SEED)
+    random_split_dataset(data, OUTPUT_PATH, args.split_ratio, SEED)
 
 if __name__ == "__main__":
     main()
+    
 
