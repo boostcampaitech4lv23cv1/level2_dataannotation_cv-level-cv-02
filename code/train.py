@@ -91,11 +91,11 @@ def parse_args():
 
     parser.add_argument('--image_size', type=int, default=1024)
     parser.add_argument('--input_size', type=int, default=512)
-    parser.add_argument('--batch_size', type=int, default=12)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
-    parser.add_argument('--save_interval', type=int, default=1)
+    parser.add_argument('--save_interval', type=int, default=10)
 
     parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
     parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
@@ -104,6 +104,8 @@ def parse_args():
 
     if args.input_size % 32 != 0:
         raise ValueError('`input_size` must be a multiple of 32')
+
+    print(args)
 
     return args
 
@@ -252,11 +254,11 @@ def do_training(data_dir, model_dir,
                             'EVal IoU loss': extra_info['iou_loss']
                         }
 
-                        eval_losses.append((img,loss_val, val_idx)) 
+                        eval_losses.append((loss_val, val_idx)) 
                         pbar.set_postfix(eval_dict)
 
             random_losses = random.sample(eval_losses, 10)
-            eval_losses = sorted(eval_losses, key = lambda x: -x[1])[:10]
+            eval_losses = sorted(eval_losses, key = lambda x: -x[0])[:10]
             top_loss_table = make_wandb_table(model, eval_losses)
             random_loss_table = make_wandb_table(model, random_losses)
 

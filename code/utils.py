@@ -46,7 +46,7 @@ VAL_ID, SOURCES = get_val_id(DATASETS_TO_USE)
 
 def make_wandb_table(model, loss):
     table =  wandb.Table(columns = ["source", "fname", "image", "loss"])
-    for _, loss, val_idx  in loss:
+    for loss, val_idx  in loss:
         file_name = VAL_ID[val_idx]
         source = SOURCES[val_idx]
         SOURCE_IMG_PATH = f"/opt/ml/input/data/{source}/images"
