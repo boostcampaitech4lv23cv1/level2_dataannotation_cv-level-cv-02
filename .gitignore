@@ -6,3 +6,4 @@ code/pths
 !.gitignore
 code/__pycache__
 code/trained_models
+wget.sh
