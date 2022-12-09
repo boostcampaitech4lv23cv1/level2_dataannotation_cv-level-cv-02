@@ -61,9 +61,13 @@ def parse_args():
     parser.add_argument('--image_size', type=int, default=1024)
     parser.add_argument('--input_size', type=int, default=512)
     parser.add_argument('--batch_size', type=int, default=12)
+
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
     parser.add_argument('--save_interval', type=int, default=20)
+
+    parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
+    parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
 
     args = parser.parse_args()
 
@@ -73,8 +77,11 @@ def parse_args():
     return args
 
 
-def do_training(data_dir, model_dir, device, image_size, input_size, num_workers, batch_size,
-                learning_rate, max_epoch, save_interval):
+def do_training(data_dir, model_dir,
+                device, image_size,
+                input_size, num_workers, batch_size,
+                learning_rate, max_epoch, save_interval,
+                start_early_stopping, early_stopping_patience):
 
     setup_wandb()
 
@@ -98,6 +105,7 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
 
     model.train()
+
     for epoch in range(max_epoch):
         epoch_loss, epoch_start = 0, time.time()
         with tqdm(total=num_batches) as pbar:
@@ -149,11 +157,12 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
                     wandb.log(val_dict)
                     pbar.set_postfix(val_dict)
 
+        val_loss = val_epoch_loss / val_num_batches
+
         print('Validation Mean loss: {:.4f} | Elapsed time: {}'.format(
-            val_epoch_loss / val_num_batches, timedelta(seconds=time.time() - val_epoch_start)))
+            val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
-        wandb.log({"Val_loss" : val_epoch_loss / val_num_batches})
-
+        wandb.log({"Val_loss" : val_loss})
 
         # save_interval이 되면, 상위 30개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
@@ -198,12 +207,42 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
             
         #끝났으니 다시 원래대로
         model.train()
+
+        #save last.pth
         if (epoch + 1) % save_interval == 0:
             if not osp.exists(model_dir):
                 os.makedirs(model_dir)
 
             ckpt_fpath = osp.join(model_dir, 'latest.pth')
             torch.save(model.state_dict(), ckpt_fpath)
+        
+        #save first loss
+        if epoch == 0 : 
+            best_loss = val_loss 
+
+        #save best.pth
+        if epoch >= start_early_stopping :
+            if val_loss < best_loss :
+                if not osp.exists(model_dir):
+                    os.makedirs(model_dir)
+
+                ckpt_fpath = osp.join(model_dir, 'best.pth')
+                torch.save(model.state_dict(), ckpt_fpath)
+                print("----- New best model in {}epoch -----".format(epoch+1))
+
+                #save best loss
+                best_loss = val_loss
+
+                #initial count
+                stopping_count = 0
+
+            else : 
+                stopping_count += 1
+
+                #early stopping
+                if stopping_count == early_stopping_patience :
+                    print("----- Stop train in {}epoch -----".format(epoch+1))
+                    break
 
 
 def main(args):
