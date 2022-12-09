@@ -29,6 +29,7 @@ from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from utils import make_wandb_table
 
 from deteval import calc_deteval_metrics
+from detect import get_bboxes, detect
 
 INFERENCE_SHAPE = 1024
 
@@ -226,8 +227,31 @@ def do_training(data_dir, model_dir,
             val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
         wandb.log({"Val_loss" : val_loss})
-        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
 
+        #(TODO) save f1 score
+        #(TODO) print f1 score
+        
+        f1_score = []
+        data_len = len(val_dataset)
+        
+        pred_dict = {}
+        gt_dict = {}
+
+        deteval_metrics = calc_deteval_metrics(pred_bboxes_dict= pred_dict, gt_bboxes_dict = gt_dict)
+        total_metrics = deteval_metrics['total']
+        
+        precision = total_metrics['precision']
+        recall = total_metrics['recall']
+        hmean = total_metrics['hmean']
+
+        print('precision: {:.4f} | recall: {:.4f} | Validation F1 score: {:.4f}'.format(precision, recall,hmean))
+
+        wandb.log({"precicion" : precision})
+        wandb.log({"recall" : recall})
+        wandb.log({"F1_score" : hmean})
+
+
+        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
             eval_num_batches = len(val_dataset)
@@ -288,8 +312,12 @@ def do_training(data_dir, model_dir,
         if epoch == 0 : 
             best_loss = val_loss 
 
+        #initial count
+        if epoch == start_early_stopping :
+            stopping_count = 0
+
         #save best.pth
-        if epoch >= start_early_stopping :
+        if epoch >= 0 :
             if val_loss < best_loss :
                 if not osp.exists(model_dir):
                     os.makedirs(model_dir)
@@ -308,9 +336,10 @@ def do_training(data_dir, model_dir,
                 stopping_count += 1
 
                 #early stopping
-                if stopping_count == early_stopping_patience :
-                    print("----- Stop train in {}epoch -----".format(epoch+1))
-                    break
+                if epoch >= start_early_stopping:
+                    if stopping_count == early_stopping_patience :
+                        print("----- Stop train in {}epoch -----".format(epoch+1))
+                        break
 
 
 def main(args):
@@ -319,4 +348,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    print("args:", args)
     main(args)
