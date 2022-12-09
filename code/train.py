@@ -26,7 +26,10 @@ import re
 import cv2
 from torch.utils.data import ConcatDataset
 from base import TOKEN_TO_PATH, DATASETS_TO_USE
-from utils import make_wandb_table
+from utils import make_wandb_table, CosineAnnealingWarmUpRestarts
+
+from deteval import calc_deteval_metrics
+from detect import get_bboxes, detect
 
 INFERENCE_SHAPE = 1024
 
@@ -97,15 +100,13 @@ def parse_args():
     parser.add_argument('--max_epoch', type=int, default=200)
     parser.add_argument('--save_interval', type=int, default=10)
 
-    parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
-    parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
+    parser.add_argument('--start_early_stopping', type=int, default=20)   ## early stopping count 시작 epoch
+    parser.add_argument('--early_stopping_patience', type=int, default=5)   ## early stopping patience
 
     args = parser.parse_args()
 
     if args.input_size % 32 != 0:
         raise ValueError('`input_size` must be a multiple of 32')
-
-    print(args)
 
     return args
 
@@ -153,8 +154,15 @@ def do_training(data_dir, model_dir,
 
     model = EAST()
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
+    scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
+
+    current_lr = scheduler.get_lr()[0]
+
 
     model.train()
 
@@ -181,7 +189,7 @@ def do_training(data_dir, model_dir,
 
                 val_dict = {
                         'Train Cls loss': extra_info['cls_loss'], 'Train Angle loss': extra_info['angle_loss'],
-                        'Train IoU loss': extra_info['iou_loss']
+                        'Train IoU loss': extra_info['iou_loss'] , "learning_rate" : current_lr
                     }
                 wandb.log(val_dict)
                 pbar.set_postfix(val_dict)
@@ -226,8 +234,8 @@ def do_training(data_dir, model_dir,
             val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
         wandb.log({"Val_loss" : val_loss})
-        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
 
+        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
             eval_num_batches = len(val_dataset)
@@ -268,20 +276,32 @@ def do_training(data_dir, model_dir,
         #끝났으니 다시 원래대로
         model.train()
 
-        #save last.pth
+        #save interval
         if (epoch + 1) % save_interval == 0:
             if not osp.exists(model_dir):
                 os.makedirs(model_dir)
 
-            ckpt_fpath = osp.join(model_dir, f'camper_icdar17_epoch_{epoch+1}.pth')
+            ckpt_fpath = osp.join(model_dir, f'epoch_{epoch+1}.pth')
+            torch.save(model.state_dict(), ckpt_fpath)
+
+        #save lastest.pth
+        if epoch >= 0:
+            if not osp.exists(model_dir):
+                os.makedirs(model_dir)
+
+            ckpt_fpath = osp.join(model_dir, 'lastest.pth')
             torch.save(model.state_dict(), ckpt_fpath)
         
         #save first loss
         if epoch == 0 : 
             best_loss = val_loss 
 
+        #initial count
+        if epoch <= start_early_stopping :
+            stopping_count = 0
+
         #save best.pth
-        if epoch >= start_early_stopping :
+        if epoch >= 0 :
             if val_loss < best_loss :
                 if not osp.exists(model_dir):
                     os.makedirs(model_dir)
@@ -300,9 +320,10 @@ def do_training(data_dir, model_dir,
                 stopping_count += 1
 
                 #early stopping
-                if stopping_count == early_stopping_patience :
-                    print("----- Stop train in {}epoch -----".format(epoch+1))
-                    break
+                if epoch >= start_early_stopping:
+                    if stopping_count == early_stopping_patience :
+                        print("----- Stop train in {}epoch -----".format(epoch+1))
+                        break
 
 
 def main(args):
@@ -311,4 +332,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    print("args:", args)
     main(args)
