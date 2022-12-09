@@ -228,6 +228,7 @@ def do_training(data_dir, model_dir,
 
         wandb.log({"Val_loss" : val_loss})
         
+
         # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
