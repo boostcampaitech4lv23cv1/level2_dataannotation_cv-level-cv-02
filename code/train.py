@@ -26,7 +26,7 @@ import re
 import cv2
 from torch.utils.data import ConcatDataset
 from base import TOKEN_TO_PATH, DATASETS_TO_USE
-from utils import make_wandb_table
+from utils import make_wandb_table, CosineAnnealingWarmUpRestarts
 
 INFERENCE_SHAPE = 1024
 
@@ -97,8 +97,8 @@ def parse_args():
     parser.add_argument('--max_epoch', type=int, default=200)
     parser.add_argument('--save_interval', type=int, default=1)
 
-    parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
-    parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
+    parser.add_argument('--start_early_stopping', type=int, default=20)   ## early stopping count 시작 epoch
+    parser.add_argument('--early_stopping_patience', type=int, default=5)   ## early stopping patience
 
     args = parser.parse_args()
 
@@ -151,8 +151,15 @@ def do_training(data_dir, model_dir,
 
     model = EAST()
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
+    scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
+
+    current_lr = scheduler.get_lr()[0]
+
 
     model.train()
 
@@ -179,7 +186,7 @@ def do_training(data_dir, model_dir,
 
                 val_dict = {
                         'Train Cls loss': extra_info['cls_loss'], 'Train Angle loss': extra_info['angle_loss'],
-                        'Train IoU loss': extra_info['iou_loss']
+                        'Train IoU loss': extra_info['iou_loss'] , "learning_rate" : current_lr
                     }
                 wandb.log(val_dict)
                 pbar.set_postfix(val_dict)
@@ -252,11 +259,11 @@ def do_training(data_dir, model_dir,
                             'EVal IoU loss': extra_info['iou_loss']
                         }
 
-                        eval_losses.append((img,loss_val, val_idx)) 
+                        eval_losses.append((loss_val, val_idx)) 
                         pbar.set_postfix(eval_dict)
 
             random_losses = random.sample(eval_losses, 10)
-            eval_losses = sorted(eval_losses, key = lambda x: -x[1])[:10]
+            eval_losses = sorted(eval_losses, key = lambda x: -x[0])[:10]
             top_loss_table = make_wandb_table(model, eval_losses)
             random_loss_table = make_wandb_table(model, random_losses)
 
@@ -309,4 +316,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    print("args:", args)
     main(args)
