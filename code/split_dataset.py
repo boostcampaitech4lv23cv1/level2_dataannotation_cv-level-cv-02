@@ -22,9 +22,11 @@ def seed_everything(seed: int = 2022):
 
 def parse_args():
     parser = ArgumentParser()
+
     # Conventional args
-    parser.add_argument('--data_name', type=str,
-                        default="nothing")
+    parser.add_argument('--data_name', type=str, default="nothing")
+    parser.add_argument('--split_ratio', type=int, default="0.8")   #split ratio
+    
     args = parser.parse_args()
     return args
 
@@ -36,11 +38,11 @@ def get_full_json(path):
 
 #(TODO) 빠르게 random_split해서 json 파일 만들기
 
-def random_split_dataset(original_json, output_path, random_seed = 2022):
+def random_split_dataset(original_json, output_path, split_ratio, random_seed = 2022):
     id_pair = list(original_json["images"].keys())
     random.Random(SEED).shuffle(id_pair)
     print("LENGTH:", len(id_pair))
-    train_cnt = int(len(id_pair) * 0.8)
+    train_cnt = int(len(id_pair) * split_ratio)
     print("TRAIN:", train_cnt)
     tr_id = set(id_pair[:train_cnt])
     val_id = set(id_pair[train_cnt:])
