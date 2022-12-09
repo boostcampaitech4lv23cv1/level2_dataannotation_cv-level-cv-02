@@ -28,6 +28,8 @@ from torch.utils.data import ConcatDataset
 from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from utils import make_wandb_table
 
+from deteval import calc_deteval_metrics
+
 INFERENCE_SHAPE = 1024
 
 #####################################
@@ -91,11 +93,11 @@ def parse_args():
 
     parser.add_argument('--image_size', type=int, default=1024)
     parser.add_argument('--input_size', type=int, default=512)
-    parser.add_argument('--batch_size', type=int, default=12)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
-    parser.add_argument('--save_interval', type=int, default=1)
+    parser.add_argument('--save_interval', type=int, default=30)
 
     parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
     parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
@@ -266,12 +268,20 @@ def do_training(data_dir, model_dir,
         #끝났으니 다시 원래대로
         model.train()
 
-        #save last.pth
+        #save interval
         if (epoch + 1) % save_interval == 0:
             if not osp.exists(model_dir):
                 os.makedirs(model_dir)
 
-            ckpt_fpath = osp.join(model_dir, f'camper_icdar17_epoch_{epoch+1}.pth')
+            ckpt_fpath = osp.join(model_dir, f'epoch_{epoch+1}.pth')
+            torch.save(model.state_dict(), ckpt_fpath)
+
+        #save lastest.pth
+        if epoch >= 0:
+            if not osp.exists(model_dir):
+                os.makedirs(model_dir)
+
+            ckpt_fpath = osp.join(model_dir, 'lastest.pth')
             torch.save(model.state_dict(), ckpt_fpath)
         
         #save first loss
