@@ -106,9 +106,9 @@ def get_val_id(dataset_types : List) -> Tuple[List, List]:
 
 VAL_ID, SOURCES = get_val_id(DATASETS_TO_USE)
 
-def make_wandb_table(model, loss):
+def make_wandb_table(model, losses):
     table =  wandb.Table(columns = ["source", "fname", "image", "loss"])
-    for sample_loss,  val_idx  in loss:
+    for loss,  val_idx  in losses:
         file_name = VAL_ID[val_idx]
         source = SOURCES[val_idx]
         SOURCE_IMG_PATH = f"/opt/ml/input/data/{source}/images"
@@ -142,5 +142,5 @@ def make_wandb_table(model, loss):
         ax.axis("off")
         ax.imshow(img[0])
         # top_loss_table.add_data(fig,loss)
-        table.add_data(source, file_name, wandb.Image(fig), sample_loss)
+        table.add_data(source, file_name, wandb.Image(fig), loss)
     return table
