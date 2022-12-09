@@ -1,6 +1,8 @@
 .*
-input
+input/*
 !code
 code/pths
 !.github
 !.gitignore
+code/__pycache__
+code/trained_models
