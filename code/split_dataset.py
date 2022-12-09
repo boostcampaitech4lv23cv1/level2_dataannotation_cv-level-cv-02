@@ -25,7 +25,7 @@ def parse_args():
 
     # Conventional args
     parser.add_argument('--data_name', type=str, default="nothing")
-    parser.add_argument('--split_ratio', type=int, default="0.8")   #split ratio
+    parser.add_argument('--split_ratio', type=float, default="0.8")   #split ratio
     
     args = parser.parse_args()
     return args
