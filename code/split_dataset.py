@@ -2,22 +2,43 @@ import json
 from sklearn.model_selection import train_test_split
 import random 
 from pathlib import Path
+import os 
+import numpy as np 
+import torch
 
-DATASET_PATH = "../input/data/ICDAR17_Korean/ufo/train.json"
+from argparse import ArgumentParser
 
-with open("../input/data/ICDAR17_Korean/ufo/train.json", "rb") as f: 
-    train_json = json.load(f)
+from base import TOKEN_TO_PATH 
 
-print("train_json", len(list(train_json["images"].keys())))
+
+def seed_everything(seed: int = 2022):
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)  # type: ignore
+    torch.backends.cudnn.deterministic = True  # type: ignore
+    torch.backends.cudnn.benchmark = True  # type: ignore
+
+def parse_args():
+    parser = ArgumentParser()
+    # Conventional args
+    parser.add_argument('--data_name', type=str,
+                        default="nothing")
+    args = parser.parse_args()
+    return args
+
+def get_full_json(path):
+    with open(path, "rb") as f: 
+        train_json = json.load(f)
+    return train_json
 
 
 #(TODO) 빠르게 random_split해서 json 파일 만들기
 
 def random_split_dataset(original_json, output_path, random_seed = 2022):
     id_pair = list(original_json["images"].keys())
-    random.seed(random_seed)
-    random.shuffle(id_pair)
-
+    random.Random(SEED).shuffle(id_pair)
     print("LENGTH:", len(id_pair))
     train_cnt = int(len(id_pair) * 0.8)
     print("TRAIN:", train_cnt)
@@ -50,7 +71,23 @@ def random_split_dataset(original_json, output_path, random_seed = 2022):
     print("FINISHED")
     return
 
-OUTPUT_PATH = "../input/data/ICDAR17_Korean/ufo/random_split"
 
-random_split_dataset(train_json, OUTPUT_PATH)
+SEED = 2022
+seed_everything(SEED)
+args = parse_args()
+
+data_name = TOKEN_TO_PATH.get(args.data_name, "nothing")
+assert data_name != "nothing", f"변환할 데이터셋의 토큰을 정확히 지정해주세요. 가능한 후보 : {list(TOKEN_TO_PATH.keys())} , 입력하신 것: {data_name}입니다."
+
+DATASET_PATH = f"../input/data/{data_name}/ufo/train.json"
+OUTPUT_PATH = f"../input/data/{data_name}/ufo/random_split"
+
+
+def main():
+    print(f"선택하신 dataset은 {data_name}입니다.")
+    data = get_full_json(DATASET_PATH)
+    random_split_dataset(data, OUTPUT_PATH, SEED)
+
+if __name__ == "__main__":
+    main()
 

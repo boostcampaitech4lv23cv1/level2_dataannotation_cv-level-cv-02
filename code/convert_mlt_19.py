@@ -10,28 +10,43 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader, ConcatDataset, Dataset
 from argparse import ArgumentParser
 
-SRC_DATASET_DIR = '/data/datasets/ICDAR17_MLT'  # FIXME
-DST_DATASET_DIR = '/data/datasets/ICDAR17_Korean'  # FIXME
+def parse_args():
+    parser = ArgumentParser()
+    # Conventional args
+    parser.add_argument('--only_korean', type=str,
+                        default="all")
+    args = parser.parse_args()
+    return args
 
-NUM_WORKERS = 32  # FIXME
+
+args = parse_args()
+CONVERT_KOREAN = False if args.only_korean == "all" else True
+
+SRC_DATASET_DIR = '/opt/ml/input/data/ICDAR19'  # FIXME
+DST_DATASET_DIR = f"{SRC_DATASET_DIR}_Korean" if CONVERT_KOREAN else SRC_DATASET_DIR
+
+print("CONVERT_TO_KOREAN??:", CONVERT_KOREAN)
+print("Save your file to :", DST_DATASET_DIR)
+
+NUM_WORKERS = 4  # FIXME
 
 IMAGE_EXTENSIONS = {'.gif', '.jpg', '.png'}
 
 LANGUAGE_MAP = {
     'Korean': 'ko',
     'Latin': 'en',
+    'Mixed': 'pass',
     'Symbols': None
 }
 
 def get_language_token(x):
     return LANGUAGE_MAP.get(x, 'others')
 
-
 def maybe_mkdir(x):
     if not osp.exists(x):
         os.makedirs(x)
 
-class MLT17Dataset(Dataset):
+class MLT19Dataset(Dataset):
     def __init__(self, image_dir, label_dir, copy_images_to=None):
         image_paths = {x for x in glob(osp.join(image_dir, '*')) if osp.splitext(x)[1] in
                        IMAGE_EXTENSIONS}
@@ -42,12 +57,14 @@ class MLT17Dataset(Dataset):
         for image_path in image_paths:
             sample_id = osp.splitext(osp.basename(image_path))[0]
 
-            label_path = osp.join(label_dir, 'gt_{}.txt'.format(sample_id))
+            label_path = osp.join(label_dir, '{}.txt'.format(sample_id))
             assert label_path in label_paths
 
             words_info, extra_info = self.parse_label_file(label_path)
-            if 'ko' not in extra_info['languages'] or extra_info['languages'].difference({'ko', 'en'}):
-                continue
+
+            if CONVERT_KOREAN:
+                if 'ko' not in extra_info['languages'] or extra_info['languages'].difference({'ko', 'en'}):
+                    continue
 
             sample_ids.append(sample_id)
             samples_info[sample_id] = dict(image_path=image_path, label_path=label_path,
@@ -111,17 +128,14 @@ def main():
     dst_image_dir = osp.join(DST_DATASET_DIR, 'images')
     # dst_image_dir = None
 
-    mlt_train = MLT17Dataset(osp.join(SRC_DATASET_DIR, 'raw/ch8_training_images'),
-                             osp.join(SRC_DATASET_DIR, 'raw/ch8_training_gt'),
+    mlt_train = MLT19Dataset(osp.join(SRC_DATASET_DIR, 'raw_images'),
+                             osp.join(SRC_DATASET_DIR, 'gt'),
                              copy_images_to=dst_image_dir)
-    mlt_valid = MLT17Dataset(osp.join(SRC_DATASET_DIR, 'raw/ch8_validation_images'),
-                             osp.join(SRC_DATASET_DIR, 'raw/ch8_validation_gt'),
-                             copy_images_to=dst_image_dir)
-    mlt_merged = ConcatDataset([mlt_train, mlt_valid])
 
     anno = dict(images=dict())
-    with tqdm(total=len(mlt_merged)) as pbar:
-        for batch in DataLoader(mlt_merged, num_workers=NUM_WORKERS, collate_fn=lambda x: x):
+
+    with tqdm(total=len(mlt_train)) as pbar:
+        for batch in DataLoader(mlt_train, num_workers=NUM_WORKERS, collate_fn=lambda x: x):
             image_fname, sample_info = batch[0]
             anno['images'][image_fname] = sample_info
             pbar.update(1)
@@ -133,4 +147,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # main()
+    main()
