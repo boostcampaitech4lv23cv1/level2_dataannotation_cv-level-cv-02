@@ -94,7 +94,7 @@ def parse_args():
 
     parser.add_argument('--image_size', type=int, default=1024)
     parser.add_argument('--input_size', type=int, default=512)
-    parser.add_argument('--batch_size', type=int, default=12)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
@@ -227,29 +227,6 @@ def do_training(data_dir, model_dir,
             val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
         wandb.log({"Val_loss" : val_loss})
-
-        # #(TODO) save f1 score
-        # #(TODO) print f1 score
-        
-        # f1_score = []
-        # data_len = len(val_dataset)
-        
-        # pred_dict = {}
-        # gt_dict = {}
-
-        # deteval_metrics = calc_deteval_metrics(pred_bboxes_dict= pred_dict, gt_bboxes_dict = gt_dict)
-        # total_metrics = deteval_metrics['total']
-        
-        # precision = total_metrics['precision']
-        # recall = total_metrics['recall']
-        # hmean = total_metrics['hmean']
-
-        # print('precision: {:.4f} | recall: {:.4f} | Validation F1 score: {:.4f}'.format(precision, recall,hmean))
-
-        # wandb.log({"precicion" : precision})
-        # wandb.log({"recall" : recall})
-        # wandb.log({"F1_score" : hmean})
-
 
         # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
