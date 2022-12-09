@@ -24,19 +24,50 @@ import json
 import random
 import re
 import cv2
+from torch.utils.data import ConcatDataset
+from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from utils import make_wandb_table
 
-IMG_PATH = "/opt/ml/input/data/ICDAR17_Korean/images"
-VAL_DATA_PATH = "/opt/ml/input/data/ICDAR17_Korean/ufo/random_split/val.json"
 INFERENCE_SHAPE = 1024
 
-with open(VAL_DATA_PATH, "rb") as f: 
-    val_json = json.load(f)
-VAL_ID = list(val_json["images"].keys())
-VAL_ID = sorted(VAL_ID, key=lambda f: int(re.sub('\D', '', f)))
+#####################################
+# (TODO) 학습시킬 PATH를 별도로 저장.
+# (TODO) data가 저장되어있는 곳들을 이렇게 담아주세요
 
-PREDICTION_RESIZE = 1024
 
+# Key   : Simple acronym for dataset
+# Value : full name for data directory path. Change it according to your path
+# e.g.) if your ICDAR19_Korean dataset is downloaded as "ic19",
+#       change "ICDAR19_Korean" ==> "ic19"
+# But we strongly recommend to download the dataset with shell script files
+###################################3
+
+"""
+TOKEN_TO_PATH : key(축약어) - value(실제 데이터셋경로)로 지정된 dictionary
+DATASETS_TO_USE : 여러 dataset 중에서 어떤 것을 사용할지를 담은 list
+
+Example) 
+>>> TOKEN_TO_PATH 
+>>> {
+    "ko17" : "ICDAR17_Korean" ,
+    "ko19" : "ICDAR19_Korean" ,
+    "camper" : "boostcamp" , 
+    "aihub"  : "aihub"}
+
+>>> DATASETS_TO_USE 
+>>> ["ko17", "camper"]
+
+
+또한, 각 데이터셋에 대해 다음과 같은 가정을 상정한다.
+
+ex) {데이터셋명} = ICDAR17_Korean  (베이스라인 코드에 이렇게 저장되어있음)
+[1] 데이터셋의 경로는 /opt/ml/input/data/{데이터셋명}"
+[2] 이미지의 경로는 /opt/ml/input/data/{데이터셋명}/images"
+[3] VAL_JSON의 경로는 /opt/ml/input/data/{데이터셋명}/ufo/random_split/val.json"
+
+"""
+
+PREDICTION_RESIZE = 512
 
 def setup_wandb(run_name = "Custom_run_name"):
     wandb.init(
@@ -63,7 +94,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=12)
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--max_epoch', type=int, default=200)
-    parser.add_argument('--save_interval', type=int, default=20)
+    parser.add_argument('--save_interval', type=int, default=1)
 
     args = parser.parse_args()
 
@@ -78,15 +109,37 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
 
     setup_wandb()
 
-    train_dataset = SceneTextDataset(data_dir, split='train', image_size=image_size, crop_size=input_size)
-    train_dataset = EASTDataset(train_dataset)
-    num_batches = math.ceil(len(train_dataset) / batch_size)
+
+    #train_data_stack, val_data_stack에 dataset을 stack한다.
+    train_data_stack = []
+    val_data_stack = []
+
+    for dataset_type in DATASETS_TO_USE:
+        data_name = TOKEN_TO_PATH.get(dataset_type, "invalid")
+        assert data_name != "invalid" , "잘못된 데이터셋 이름을 입력하셨습니다. 다운로드한 데이터셋 환경을 확인해주세요"
+
+        DATA_PATH = f"/opt/ml/input/data/{data_name}"
+        IMG_PATH = f"/opt/ml/input/data/{data_name}/images"
+        VAL_DATA_PATH = f"/opt/ml/input/data/{data_name}/ufo/random_split/val.json"
+
+        sub_train_dataset = SceneTextDataset(DATA_PATH, split='train', image_size=image_size, crop_size=input_size)
+        sub_train_dataset = EASTDataset(sub_train_dataset)
+        train_data_stack.append(sub_train_dataset)
+
+        sub_val_dataset = SceneTextDataset(DATA_PATH, split='val', image_size=image_size, crop_size=input_size)
+        sub_val_dataset = EASTDataset(sub_val_dataset)
+        val_data_stack.append(sub_val_dataset)
+
+
+    # ConcatDataset을 통해 다 합쳐준다.
+    train_dataset = ConcatDataset(train_data_stack)
+    val_dataset = ConcatDataset(val_data_stack)
+
+    train_num_batches = math.ceil(len(train_dataset) / batch_size)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
     #(TODO) train_dataset을 val_dataset으로 대체
 
-    val_dataset = SceneTextDataset(data_dir, split='val', image_size=image_size, crop_size=input_size)
-    val_dataset = EASTDataset(val_dataset)
     val_num_batches = math.ceil(len(val_dataset) / batch_size)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
@@ -97,12 +150,18 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
 
-    model.train()
+
     for epoch in range(max_epoch):
-        epoch_loss, epoch_start = 0, time.time()
-        with tqdm(total=num_batches) as pbar:
+        model.train()
+        train_epoch_loss, epoch_start = 0, time.time()
+        with tqdm(total=train_num_batches) as pbar:
             for img, gt_score_map, gt_geo_map, roi_mask in train_loader:
                 pbar.set_description('[Epoch {}]'.format(epoch + 1))
+
+                if torch.sum(gt_score_map) < 1 : 
+                    # print("Skip this label")
+                    pbar.update(1)
+                    continue
 
                 loss, extra_info = model.train_step(img, gt_score_map, gt_geo_map, roi_mask)
                 optimizer.zero_grad()
@@ -110,33 +169,38 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
                 optimizer.step()
 
                 loss_val = loss.item()
-                epoch_loss += loss_val
-
+                train_epoch_loss += loss_val
                 pbar.update(1)
+
                 val_dict = {
-                    'Train Cls loss': extra_info['cls_loss'], 'Train Angle loss': extra_info['angle_loss'],
-                    'Train IoU loss': extra_info['iou_loss']
-                }
+                        'Train Cls loss': extra_info['cls_loss'], 'Train Angle loss': extra_info['angle_loss'],
+                        'Train IoU loss': extra_info['iou_loss']
+                    }
                 wandb.log(val_dict)
                 pbar.set_postfix(val_dict)
 
         scheduler.step()
 
         print('Training Mean loss: {:.4f} | Elapsed time: {}'.format(
-            epoch_loss / num_batches, timedelta(seconds=time.time() - epoch_start)))
+            train_epoch_loss / train_num_batches, timedelta(seconds=time.time() - epoch_start)))
        
-        wandb.log({"Train_loss" : epoch_loss / num_batches})
+        wandb.log({"Train_loss" : train_epoch_loss / train_num_batches})
 
         #Model을 validation으로 바꿔줌
         model.eval()
 
         with tqdm(total=val_num_batches) as pbar:
             val_epoch_loss, val_epoch_start = 0, time.time()
+
             with torch.no_grad():
                 for val_idx , (img, gt_score_map, gt_geo_map, roi_mask) in enumerate(val_loader):
                     pbar.set_description('[Epoch {} Validation]'.format(epoch + 1))
 
-                    #(TODO) 사실은 val_step이랑 동일하다!
+                    if torch.sum(gt_score_map) < 1 : 
+                        # print("Skip this label")
+                        pbar.update(1)
+                        continue
+
                     loss, extra_info = model.train_step(img, gt_score_map, gt_geo_map, roi_mask)
                     loss_val = loss.item()
                     val_epoch_loss += loss_val
@@ -154,18 +218,14 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
 
         wandb.log({"Val_loss" : val_epoch_loss / val_num_batches})
 
-
-        # save_interval이 되면, 상위 30개에 대해 Loss sample을 분석!
+        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
-            eval_dataset = SceneTextDataset(data_dir, split='val', image_size=image_size, crop_size=input_size)
-            eval_dataset = EASTDataset(eval_dataset)
-            eval_num_batches = len(eval_dataset)
-            eval_loader = DataLoader(eval_dataset, batch_size= EVAL_BATCH_SIZE , shuffle=False, num_workers=4)
+            eval_num_batches = len(val_dataset)
 
+            eval_loader = DataLoader(val_dataset, batch_size= EVAL_BATCH_SIZE , shuffle=False, num_workers=4)
             model.eval()
             eval_losses = []
-            print("eval_num_batches:", eval_num_batches)
             with tqdm(total= eval_num_batches) as pbar:
                 with torch.no_grad():
                     for val_idx , (img, gt_score_map, gt_geo_map, roi_mask) in enumerate(eval_loader):
@@ -202,7 +262,7 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
             if not osp.exists(model_dir):
                 os.makedirs(model_dir)
 
-            ckpt_fpath = osp.join(model_dir, 'latest.pth')
+            ckpt_fpath = osp.join(model_dir, f'camper_icdar17_epoch_{epoch+1}.pth')
             torch.save(model.state_dict(), ckpt_fpath)
 
 

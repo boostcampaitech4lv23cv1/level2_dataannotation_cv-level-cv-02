@@ -355,8 +355,21 @@ class SceneTextDataset(Dataset):
 
         vertices, labels = [], []
         for word_info in self.anno['images'][image_fname]['words'].values():
-            vertices.append(np.array(word_info['points']).flatten())
+
+            points = np.array(word_info['points']).flatten()
+
+            # 8개넘어가면 안되게끔, polygon에 외접한 직사각형으로 수정!
+            if len(points) > 8 : 
+                x = [round(points[i]) for i in range(len(points)) if i%2 ==0]
+                y = [round(points[i]) for i in range(len(points)) if i%2 !=0]
+                tmp_points = np.array([[x_pos, y_pos] for x_pos, y_pos in zip(x,y)])
+                rect = cv2.minAreaRect(tmp_points)
+                circum_box= cv2.boxPoints(rect)
+                points = np.array(circum_box).flatten()
+
+            vertices.append(points)
             labels.append(int(not word_info['illegibility']))
+
         vertices, labels = np.array(vertices, dtype=np.float32), np.array(labels, dtype=np.int64)
 
         vertices, labels = filter_vertices(vertices, labels, ignore_under=10, drop_under=1)
