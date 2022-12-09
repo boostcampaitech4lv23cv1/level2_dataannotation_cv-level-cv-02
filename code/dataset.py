@@ -382,6 +382,7 @@ class SceneTextDataset(Dataset):
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
+            
         image = np.array(image)
 
         funcs = []
