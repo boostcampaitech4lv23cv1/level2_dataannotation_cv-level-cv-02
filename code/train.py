@@ -66,8 +66,8 @@ def parse_args():
     parser.add_argument('--max_epoch', type=int, default=200)
     parser.add_argument('--save_interval', type=int, default=20)
 
-    parser.add_argument('--start_early_stopping', type=int, default=2)   ## early stopping count 시작 epoch
-    parser.add_argument('--early_stopping_patience', type=int, default=2)   ## early stopping patience
+    parser.add_argument('--start_early_stopping', type=int, default=30)   ## early stopping count 시작 epoch
+    parser.add_argument('--early_stopping_patience', type=int, default=10)   ## early stopping patience
 
     args = parser.parse_args()
 
