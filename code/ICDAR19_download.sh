@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+echo "하단의 주석친 부분은 원격 서버에서 ICDAR19를 받아오는 코드입니다. 구글 드라이브를 이용할 시 이 파일은 필요 없습니다.."
+
 mkdir -p "../input/data/ICDAR19"
 cd "../input/data/ICDAR19"
 echo "https://datasets.cvc.uab.es/rrc/ImagesPart1.zip" >> download.txt

@@ -2,6 +2,8 @@
 input
 !code
 code/pths
+code/trained_models
+code/__pycache__
 !.github
 !.gitignore
 
