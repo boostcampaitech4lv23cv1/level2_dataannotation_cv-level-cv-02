@@ -11,7 +11,7 @@ from model import EAST
 from tqdm import tqdm
 
 from detect import detect
-
+import numpy as np
 
 CHECKPOINT_EXTENSIONS = ['.pth', '.ckpt']
 
@@ -45,8 +45,24 @@ def do_inference(model, ckpt_fpath, data_dir, input_size, batch_size, split='pub
     images = []
     for image_fpath in tqdm(glob(osp.join(data_dir, '{}/*'.format(split)))):
         image_fnames.append(osp.basename(image_fpath))
+        image =  cv2.imread(image_fpath)[:, :, ::-1]
 
-        images.append(cv2.imread(image_fpath)[:, :, ::-1])
+        width, height, channel = image.shape 
+        padding = 0
+        if width >= height:
+            adjust_width = int(input_size * height / (input_size -4))        
+
+            if width <= adjust_width: #detect의 로직에 의해 prediction이 없어짐
+                padding = int((adjust_width - width)/ 2) + 3
+                image = np.pad(image, ((padding,padding),(0,0),(0,0)), "constant")
+
+        else:
+            adjust_height = int(input_size * width / (input_size -4))        
+            if height <= adjust_height: #detect의 로직에 의해 prediction이 없어짐
+                padding = int((adjust_height - height)/ 2) +3
+                image = np.pad(image, ((0,0),(padding, padding),(0,0)), "constant")
+
+        images.append(image)
         if len(images) == batch_size:
             by_sample_bboxes.extend(detect(model, images, input_size))
             images = []
