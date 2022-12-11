@@ -1,16 +1,3 @@
-import os.path as osp
-import math
-import json
-from PIL import Image
-
-import torch
-import numpy as np
-import cv2
-import albumentations as A
-from torch.utils.data import Dataset
-from shapely.geometry import Polygon
-
-
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
     return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -196,6 +183,8 @@ def crop_img(img, vertices, labels, length):
         region      : cropped image region
         new_vertices: new vertices in cropped region
     '''
+    n = random.choice([0,1,2,3,4,5,6,7,8,9,10])
+    length += n*32
     h, w = img.height, img.width
     # confirm the shortest side of image >= length
     if h >= w and w < length:
@@ -333,6 +322,12 @@ def filter_vertices(vertices, labels, ignore_under=0, drop_under=0):
     return new_vertices, new_labels
 
 
+def convert_tensor_to_PIL(image_tensor):
+    invTrans = A.Compose([A.Normalize(mean = [ 0., 0., 0. ],std = [ 1/0.229, 1/0.224, 1/0.225 ],max_pixel_value=1/255),A.Normalize(mean = [ -0.485, -0.456, -0.406 ],std = [ 1/255, 1/255, 1/255 ],max_pixel_value=255)])
+    img = Image.fromarray((invTrans(image = image_tensor))['image'].astype(np.uint8))
+    return img
+
+
 class SceneTextDataset(Dataset):
     def __init__(self, root_dir, split='train', image_size=1024, crop_size=512, color_jitter=True,
                  normalize=True):
@@ -383,8 +378,9 @@ class SceneTextDataset(Dataset):
 
         vertices, labels = filter_vertices(vertices, labels, ignore_under=10, drop_under=1)
 
+
         image = Image.open(image_fpath)
-        #image, vertices = resize_img(image, vertices, self.image_size)
+        image, vertices = resize_img(image, vertices, self.image_size)
         #image, vertices = adjust_height(image, vertices)
         #image, vertices = rotate_img(image, vertices)
         #image, vertices = crop_img(image, vertices, labels, self.crop_size)
@@ -395,22 +391,32 @@ class SceneTextDataset(Dataset):
             
         image = np.array(image)
 
+        vertices = vertices.reshape([-1,2])
+
         funcs = []
+        funcs.append(A.HorizontalFlip(p=0.01))
+        funcs.append(A.RandomRotate90(p=0.2))
         if self.color_jitter:
             funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25))
-        if self.normalize:
-            funcs.append(A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
-        funcs.append(A.HorizontalFlip(p=0.5))
-        funcs.append(A.RandomCrop(width=300, height=300, p = 0.5))
-        funcs.append(A.Resize(height = 512, width = 512))
-        #transform = A.Compose(funcs)
+        funcs.append(A.CLAHE(p=0.2))
+        
+
         transform = A.Compose(funcs, keypoint_params=A.KeypointParams(format='xy'))
-        #print('shape:',image.shape)
-        #print('vertices',vertices)
         transformed = transform(image = image, keypoints = vertices)
         image = transformed['image']
         vertices = transformed['keypoints']
         vertices = np.array(vertices)
+        vertices = vertices.reshape([-1,8])
+
+        image, vertices = crop_img(Image.fromarray(image), vertices, labels, self.crop_size)
+        image, vertices = resize_img(image, vertices, self.crop_size)
+        image, vertices = adjust_height(image, vertices)
+        image, vertices = rotate_img(image, vertices)
+
+        image = np.array(image)
+        if self.normalize:
+            image = A.Normalize(mean = (0.485, 0.456, 0.406), std = (0.229, 0.224, 0.225),max_pixel_value=255)(image = image)['image']
+
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
         roi_mask = generate_roi_mask(image, vertices, labels)
 
