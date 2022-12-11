@@ -31,6 +31,8 @@ from utils import make_wandb_table, CosineAnnealingWarmUpRestarts
 from deteval import calc_deteval_metrics
 from detect import get_bboxes, detect
 
+from torchvision.transforms import ToPILImage
+
 INFERENCE_SHAPE = 1024
 
 #####################################
@@ -161,16 +163,22 @@ def do_training(data_dir, model_dir,
     optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
     scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
 
-    current_lr = scheduler.get_lr()[0]
+    
 
 
     model.train()
 
-    for epoch in range(max_epoch):
+    for epoch in range(max_epoch): #---------------------------------start epoch--------------
+        current_lr = scheduler.get_lr()[0]
         model.train()
         train_epoch_loss, epoch_start = 0, time.time()
         with tqdm(total=train_num_batches) as pbar:
-            for img, gt_score_map, gt_geo_map, roi_mask in train_loader:
+            for img, gt_score_map, gt_geo_map, roi_mask in train_loader: #---------------start batch------------
+                if epoch == 0 :
+                    for i in range(5):
+                        pilimg = ToPILImage()(img[i])
+                        pilimg.save(f'sample{i}.png', 'png') #######
+                
                 pbar.set_description('[Epoch {}]'.format(epoch + 1))
 
                 if torch.sum(gt_score_map) < 1 : 
@@ -192,7 +200,7 @@ def do_training(data_dir, model_dir,
                         'Train IoU loss': extra_info['iou_loss'] , "learning_rate" : current_lr
                     }
                 wandb.log(val_dict)
-                pbar.set_postfix(val_dict)
+                pbar.set_postfix(val_dict) #----------------end batch---------------------------------
 
         scheduler.step()
 

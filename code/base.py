@@ -8,4 +8,4 @@ TOKEN_TO_PATH = {
     "camper" : "boostcamp" , 
     "aihub"  : "aihub"}
 
-DATASETS_TO_USE = ["ko17", "full19"]
+DATASETS_TO_USE = ['ko17']

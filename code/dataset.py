@@ -357,6 +357,13 @@ class SceneTextDataset(Dataset):
         for word_info in self.anno['images'][image_fname]['words'].values():
 
             points = np.array(word_info['points']).flatten()
+            check_point = 0 
+            # if len(points) > 8:
+            #     check_point = 1
+            #     print('*********')
+            #     print(image_fname)
+            #     print('len(points):',len(points))
+            #     print('word_info', len(word_info['points']))
 
             # 8개넘어가면 안되게끔, polygon에 외접한 직사각형으로 수정!
             if len(points) > 8 : 
@@ -367,18 +374,21 @@ class SceneTextDataset(Dataset):
                 circum_box= cv2.boxPoints(rect)
                 points = np.array(circum_box).flatten()
 
+            # if check_point == 1: print('postprocess : ', len(points))
             vertices.append(points)
             labels.append(int(not word_info['illegibility']))
+
 
         vertices, labels = np.array(vertices, dtype=np.float32), np.array(labels, dtype=np.int64)
 
         vertices, labels = filter_vertices(vertices, labels, ignore_under=10, drop_under=1)
 
         image = Image.open(image_fpath)
-        image, vertices = resize_img(image, vertices, self.image_size)
-        image, vertices = adjust_height(image, vertices)
-        image, vertices = rotate_img(image, vertices)
-        image, vertices = crop_img(image, vertices, labels, self.crop_size)
+        #image, vertices = resize_img(image, vertices, self.image_size)
+        #image, vertices = adjust_height(image, vertices)
+        #image, vertices = rotate_img(image, vertices)
+        #image, vertices = crop_img(image, vertices, labels, self.crop_size)
+
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
@@ -390,9 +400,17 @@ class SceneTextDataset(Dataset):
             funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25))
         if self.normalize:
             funcs.append(A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
-        transform = A.Compose(funcs)
-
-        image = transform(image=image)['image']
+        funcs.append(A.HorizontalFlip(p=0.5))
+        funcs.append(A.RandomCrop(width=300, height=300, p = 0.5))
+        funcs.append(A.Resize(height = 512, width = 512))
+        #transform = A.Compose(funcs)
+        transform = A.Compose(funcs, keypoint_params=A.KeypointParams(format='xy'))
+        #print('shape:',image.shape)
+        #print('vertices',vertices)
+        transformed = transform(image = image, keypoints = vertices)
+        image = transformed['image']
+        vertices = transformed['keypoints']
+        vertices = np.array(vertices)
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
         roi_mask = generate_roi_mask(image, vertices, labels)
 
