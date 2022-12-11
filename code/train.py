@@ -156,7 +156,7 @@ def do_training(data_dir, model_dir,
     model = EAST()
     model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
 
     # optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
