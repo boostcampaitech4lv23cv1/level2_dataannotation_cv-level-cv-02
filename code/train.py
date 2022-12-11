@@ -19,6 +19,7 @@ from detect import detect
 import wandb
 import matplotlib.pyplot as plt
 import numpy as np
+
 import json
 
 import random
@@ -29,7 +30,7 @@ from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from utils import make_wandb_table, CosineAnnealingWarmUpRestarts
 
 from deteval import calc_deteval_metrics
-from detect import get_bboxes, detect
+from detect import get_bboxes
 
 INFERENCE_SHAPE = 1024
 
@@ -155,14 +156,13 @@ def do_training(data_dir, model_dir,
     model = EAST()
     model.to(device)
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
-    scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
+    # optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
+    # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
 
     current_lr = scheduler.get_lr()[0]
-
 
     model.train()
 
@@ -197,15 +197,21 @@ def do_training(data_dir, model_dir,
         scheduler.step()
 
         print('Training Mean loss: {:.4f} | Elapsed time: {}'.format(
-            train_epoch_loss / train_num_batches, timedelta(seconds=time.time() - epoch_start)))
+                train_epoch_loss / train_num_batches, timedelta(seconds=time.time() - epoch_start)))
        
         wandb.log({"Train_loss" : train_epoch_loss / train_num_batches})
 
         #Model을 validation으로 바꿔줌
         model.eval()
-
+        
         with tqdm(total=val_num_batches) as pbar:
+
             val_epoch_loss, val_epoch_start = 0, time.time()
+            
+            #save bbox
+            pred_boxes = []
+            gt_boxes = []
+            transcript_list = []
 
             with torch.no_grad():
                 for val_idx , (img, gt_score_map, gt_geo_map, roi_mask) in enumerate(val_loader):
@@ -215,7 +221,8 @@ def do_training(data_dir, model_dir,
                         # print("Skip this label")
                         pbar.update(1)
                         continue
-
+                    
+                    #loss
                     loss, extra_info = model.train_step(img, gt_score_map, gt_geo_map, roi_mask)
                     loss_val = loss.item()
                     val_epoch_loss += loss_val
@@ -228,13 +235,72 @@ def do_training(data_dir, model_dir,
                     wandb.log(val_dict)
                     pbar.set_postfix(val_dict)
 
+            #get pred_score_map, pred_geo_map
+            with torch.no_grad():
+                pred_score_map, pred_geo_map = model.forward(img.to(device))
+                    
+            #load gt_score, gt_geo, pred_score, pred_geo
+            for pred_score, pred_geo, gt_score, gt_geo in zip( pred_score_map.cpu().numpy(),
+                                                                pred_geo_map.cpu().numpy(),
+                                                                gt_score_map.cpu().numpy(),
+                                                                gt_geo_map.cpu().numpy(), ) :
+                        
+                #get bbox
+                pred_bbox = get_bboxes(pred_score, pred_geo, score_thresh=0.9, nms_thresh=0.2)
+                gt_bbox = get_bboxes(gt_score, gt_geo, score_thresh=0.9, nms_thresh=0.2)
+
+                if pred_bbox is None :
+                    pred_bbox = np.zeros((0, 4, 2), dtype="float32")
+                else :
+                    pred_bbox = pred_bbox[:, :8]
+                    pred_bbox = pred_bbox.reshape(-1, 4, 2)
+
+                if gt_bbox is None :
+                    gt_bbox = np.zeros((0, 4, 2), dtype="float32")
+                    script = ['###' for _ in range(gt_bbox.shape[0])]
+                else :
+                    gt_bbox = gt_bbox[:, :8]
+                    gt_bbox = gt_bbox.reshape(-1, 4, 2)
+                    script = ['Rocketdan' for _ in range(gt_bbox.shape[0])]
+                
+                transcript_list.append(script)
+                pred_boxes.append(pred_bbox)
+                gt_boxes.append(gt_bbox)
+
+        #print val loss
         val_loss = val_epoch_loss / val_num_batches
 
         print('Validation Mean loss: {:.4f} | Elapsed time: {}'.format(
             val_loss, timedelta(seconds=time.time() - val_epoch_start)))
 
         wandb.log({"Val_loss" : val_loss})
+
+        #calculate f1 score
+        pred_dict = {}
+        gt_dict = {}
+        script_dict = {}
+
+        for data_num in range(len(transcript_list)) :
+            pred_dict[f'image_{data_num}'] = pred_boxes[data_num]
+            gt_dict[f'image_{data_num}'] = gt_boxes[data_num]
+            script_dict[f'image_{data_num}'] = transcript_list[data_num]
+
+        deteval_metrics = calc_deteval_metrics(pred_bboxes_dict= pred_dict,
+                                                gt_bboxes_dict = gt_dict,
+                                                transcriptions_dict = script_dict)
+
+        total_metrics = deteval_metrics['total']
+
+        precision = total_metrics['precision']
+        recall = total_metrics['recall']
+        hmean = total_metrics['hmean']
+
+        #print f1 score
+        print('precision: {:.4f} | recall: {:.4f} | Validation F1 score: {:.4f}\n'.format(precision, recall, hmean))
         
+        wandb.log({"precision" : precision})
+        wandb.log({"recall" : recall})
+        wandb.log({"F1_score" : hmean})
 
         # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
@@ -295,7 +361,7 @@ def do_training(data_dir, model_dir,
         
         #save first loss
         if epoch == 0 : 
-            best_loss = val_loss 
+            best_hmean = hmean 
 
         #initial count
         if epoch <= start_early_stopping :
@@ -303,16 +369,16 @@ def do_training(data_dir, model_dir,
 
         #save best.pth
         if epoch >= 0 :
-            if val_loss < best_loss :
+            if hmean > best_hmean :
                 if not osp.exists(model_dir):
                     os.makedirs(model_dir)
 
                 ckpt_fpath = osp.join(model_dir, 'best.pth')
                 torch.save(model.state_dict(), ckpt_fpath)
-                print("----- New best model in {}epoch -----".format(epoch+1))
+                print("******************** New best model in {}epoch ********************".format(epoch+1))
 
                 #save best loss
-                best_loss = val_loss
+                best_hmean = hmean
 
                 #initial count
                 stopping_count = 0
@@ -323,7 +389,7 @@ def do_training(data_dir, model_dir,
                 #early stopping
                 if epoch >= start_early_stopping:
                     if stopping_count == early_stopping_patience :
-                        print("----- Stop train in {}epoch -----".format(epoch+1))
+                        print("******************** Stop train in {}epoch ********************".format(epoch+1))
                         break
 
 
