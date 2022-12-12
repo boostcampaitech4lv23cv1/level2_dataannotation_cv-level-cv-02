@@ -6,6 +6,14 @@ TOKEN_TO_PATH = {
     "full17": "ICDAR17" , 
     "full19" : "ICDAR19",
     "camper" : "boostcamp" , 
-    "aihub"  : "aihub"}
+    "aihub"  : "aihub"     ,
+    "aihub_small" : "aihub_small" , 
+    "aihub_test" : "aihub_test_100",
+    "eng17" : "ICDAR17_English"
+    }
 
-DATASETS_TO_USE = ["ko17", "full19"]
+DATASETS_TO_USE = ["ko17", "full19"] 
+
+
+# Test Experiment시 하단 식으로 세팅을 해주시기 바랍니다.
+# DATASETS_TO_USE = ["ko17", "ko19", "eng17", "aihub_test"]
