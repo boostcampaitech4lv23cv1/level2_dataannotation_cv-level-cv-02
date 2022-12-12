@@ -4,7 +4,6 @@ import math
 import json
 from PIL import Image
 
-import torch
 import numpy as np
 import cv2
 import albumentations as A
@@ -12,7 +11,9 @@ from torch.utils.data import Dataset
 from shapely.geometry import Polygon
 
 import random
+import matplotlib.pyplot as plt
 
+from custom_aug import ComposedTransformation
 
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
@@ -199,7 +200,7 @@ def crop_img(img, vertices, labels, length):
         region      : cropped image region
         new_vertices: new vertices in cropped region
     '''
-    n = random.choice([0,1,2,3,4,5,6,7,8,9,10])
+    n = random.choice([0,2,4,6,8,10])
     length += n*32
     h, w = img.height, img.width
     # confirm the shortest side of image >= length
@@ -340,8 +341,27 @@ def filter_vertices(vertices, labels, ignore_under=0, drop_under=0):
 
 def convert_tensor_to_PIL(image_tensor):
     invTrans = A.Compose([A.Normalize(mean = [ 0., 0., 0. ],std = [ 1/0.229, 1/0.224, 1/0.225 ],max_pixel_value=1/255),A.Normalize(mean = [ -0.485, -0.456, -0.406 ],std = [ 1/255, 1/255, 1/255 ],max_pixel_value=255)])
+    invTrans = A.Compose([A.Normalize(mean = [ 0., 0., 0. ],std = [ 1, 1,1] ,max_pixel_value=1)])
+
     img = Image.fromarray((invTrans(image = image_tensor))['image'].astype(np.uint8))
     return img
+
+def plot_ground_truth(dataset_output0, dataset_output1):
+
+    img = convert_tensor_to_PIL(dataset_output0)
+    
+    fig, ax = plt.subplots(1,1)
+    #ground_truth = source_val_json["images"][IMG_NAME]["words"]
+    dataset_output1 = dataset_output1.astype(np.int32)
+
+    for points in  dataset_output1:
+    
+        points = points[::-1]
+        points = np.append(points,points[0]).reshape(-1,2)
+        for prev_pos, next_pos in zip(points[:-1], points[1:]):
+            ax.plot( [prev_pos[0], next_pos[0]], [prev_pos[1], next_pos[1]],color='r', linestyle='-', linewidth=1.5)
+    ax.axis("off")
+    ax.imshow(img)
 
 
 class SceneTextDataset(Dataset):
@@ -356,6 +376,23 @@ class SceneTextDataset(Dataset):
 
         self.image_size, self.crop_size = image_size, crop_size
         self.color_jitter, self.normalize = color_jitter, normalize
+
+        self.split = split
+
+        self.train_transforms = ComposedTransformation(
+            rotate_range=30, crop_aspect_ratio=1.0, crop_size=0.3, hflip=True, vflip=True,
+            random_translate=True, min_image_overlap=0.9, min_bbox_overlap=0.99, min_bbox_count=1,
+            allow_partial_occurrence=True,
+            resize_to=512,
+            max_random_trials=50,
+            brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25,
+            normalize=True, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), to_tensor=False
+        )
+
+        self.valid_transforms = ComposedTransformation(
+            resize_to=512,
+            normalize=True, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), to_tensor=False
+        )
 
     def __len__(self):
         return len(self.image_fnames)
@@ -396,7 +433,7 @@ class SceneTextDataset(Dataset):
 
 
         image = Image.open(image_fpath)
-        image, vertices = resize_img(image, vertices, self.image_size)
+        #image, vertices = resize_img(image, vertices, self.image_size)
         #image, vertices = adjust_height(image, vertices)
         #image, vertices = rotate_img(image, vertices)
         #image, vertices = crop_img(image, vertices, labels, self.crop_size)
@@ -407,33 +444,19 @@ class SceneTextDataset(Dataset):
             
         image = np.array(image)
 
-        vertices = vertices.reshape([-1,2])
-
-        funcs = []
-        funcs.append(A.HorizontalFlip(p=0.01))
-        funcs.append(A.RandomRotate90(p=0.2))
-        if self.color_jitter:
-            funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25))
-        funcs.append(A.CLAHE(p=0.2))
-        
-
-        transform = A.Compose(funcs, keypoint_params=A.KeypointParams(format='xy'))
-        transformed = transform(image = image, keypoints = vertices)
-        image = transformed['image']
-        vertices = transformed['keypoints']
-        vertices = np.array(vertices)
-        vertices = vertices.reshape([-1,8])
-
-        image, vertices = crop_img(Image.fromarray(image), vertices, labels, self.crop_size)
-        image, vertices = resize_img(image, vertices, self.crop_size)
-        image, vertices = adjust_height(image, vertices)
-        image, vertices = rotate_img(image, vertices)
-
-        image = np.array(image)
-        if self.normalize:
-            image = A.Normalize(mean = (0.485, 0.456, 0.406), std = (0.229, 0.224, 0.225),max_pixel_value=255)(image = image)['image']
-
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
+
+        if self.split == 'train':
+            ## ComposedTransformation 적용    
+            composed_transform = self.train_transforms(image=image, word_bboxes=word_bboxes)
+            image = composed_transform['image']
+            word_bboxes = composed_transform['word_bboxes']
+
+        elif self.split == 'val':
+            composed_transform = self.valid_transforms(image=image, word_bboxes=word_bboxes)
+            image = composed_transform['image']
+            word_bboxes = composed_transform['word_bboxes']
+
         roi_mask = generate_roi_mask(image, vertices, labels)
 
         return image, word_bboxes, roi_mask
