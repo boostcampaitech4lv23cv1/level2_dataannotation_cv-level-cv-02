@@ -104,7 +104,7 @@ def parse_args():
     parser.add_argument('--start_early_stopping', type=int, default=20)   ## early stopping count 시작 epoch
     parser.add_argument('--early_stopping_patience', type=int, default=5)   ## early stopping patience
 
-    parser.add_argument('--load_from', type= str, default = None)
+    parser.add_argument("--load_from", type= str, default = None)
 
     args = parser.parse_args()
 
@@ -157,8 +157,6 @@ def do_training(data_dir, model_dir,
 
     model = EAST()
     model.to(device)
-    
-    #load checkpoint
     if load_from is not None:
         print("Load from checkpoint")
         model.load_state_dict(torch.load(f"/opt/ml/code/trained_models/{args.load_from}", map_location = device))
