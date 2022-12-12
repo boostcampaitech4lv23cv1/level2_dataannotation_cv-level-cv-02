@@ -6,4 +6,5 @@ python train.py --image_size 1024 \
 --max_epoch 200 \
 --save_interval 10 \
 --start_early_stopping 30 \
---early_stopping_patience 10
+--early_stopping_patience 10 \
+--load_from "best.pth"

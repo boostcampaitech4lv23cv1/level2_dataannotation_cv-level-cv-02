@@ -104,6 +104,8 @@ def parse_args():
     parser.add_argument('--start_early_stopping', type=int, default=20)   ## early stopping count 시작 epoch
     parser.add_argument('--early_stopping_patience', type=int, default=5)   ## early stopping patience
 
+    parser.add_argument('--load_from', type= str, default = None)
+
     args = parser.parse_args()
 
     if args.input_size % 32 != 0:
@@ -115,7 +117,7 @@ def do_training(data_dir, model_dir,
                 device, image_size,
                 input_size, num_workers, batch_size,
                 learning_rate, max_epoch, save_interval,
-                start_early_stopping, early_stopping_patience):
+                start_early_stopping, early_stopping_patience, load_from):
 
     setup_wandb()
 
@@ -155,6 +157,12 @@ def do_training(data_dir, model_dir,
 
     model = EAST()
     model.to(device)
+    
+    #load checkpoint
+    if load_from is not None:
+        print("Load from checkpoint")
+        model.load_state_dict(torch.load(f"/opt/ml/code/trained_models/{args.load_from}", map_location = device))
+        print("Load complete")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
