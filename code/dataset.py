@@ -446,8 +446,6 @@ class SceneTextDataset(Dataset):
 
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
 
-
-
         if self.split == 'train':
             ## ComposedTransformation 적용    
             composed_transform = self.train_transforms(image=image, word_bboxes=word_bboxes)
@@ -458,7 +456,6 @@ class SceneTextDataset(Dataset):
             composed_transform = self.valid_transforms(image=image, word_bboxes=word_bboxes)
             image = composed_transform['image']
             word_bboxes = composed_transform['word_bboxes']
-
 
         roi_mask = generate_roi_mask(image, vertices, labels)
 
