@@ -164,8 +164,6 @@ def do_training(data_dir, model_dir,
         model.load_state_dict(torch.load(f"/opt/ml/code/trained_models/{args.load_from}", map_location = device))
         print("Load complete")
 
-
-
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
 
