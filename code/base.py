@@ -12,7 +12,7 @@ TOKEN_TO_PATH = {
     "eng17" : "ICDAR17_English"
     }
 
-DATASETS_TO_USE = ["ko17", "full19"] 
+DATASETS_TO_USE = ["full17", "full19", "camper"] 
 
 
 # Test Experiment시 하단 식으로 세팅을 해주시기 바랍니다.
