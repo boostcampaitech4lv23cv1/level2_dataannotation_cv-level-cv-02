@@ -1,15 +1,18 @@
+import cv2
 import os.path as osp
 import math
 import json
-from PIL import Image
+from PIL import Image, ImageOps
 
-import torch
 import numpy as np
 import cv2
 import albumentations as A
 from torch.utils.data import Dataset
 from shapely.geometry import Polygon
 
+import matplotlib.pyplot as plt
+
+from custom_aug import ComposedTransformation
 
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
@@ -185,7 +188,7 @@ def is_cross_text(start_loc, length, vertices):
     return False
 
 
-def crop_img(img, vertices, labels, length):
+def rand_crop_img(img, vertices, labels, length):
     '''crop img patches to obtain batch and augment
     Input:
         img         : PIL Image
@@ -196,6 +199,8 @@ def crop_img(img, vertices, labels, length):
         region      : cropped image region
         new_vertices: new vertices in cropped region
     '''
+    n = np.random.choice([0,2,4,6,8,10])
+    length += n*32
     h, w = img.height, img.width
     # confirm the shortest side of image >= length
     if h >= w and w < length:
@@ -333,9 +338,34 @@ def filter_vertices(vertices, labels, ignore_under=0, drop_under=0):
     return new_vertices, new_labels
 
 
+def convert_tensor_to_PIL(image_tensor):
+    invTrans = A.Compose([A.Normalize(mean = [ 0., 0., 0. ],std = [ 1/0.229, 1/0.224, 1/0.225 ],max_pixel_value=1/255),A.Normalize(mean = [ -0.485, -0.456, -0.406 ],std = [ 1/255, 1/255, 1/255 ],max_pixel_value=255)])
+    invTrans = A.Compose([A.Normalize(mean = [ 0., 0., 0. ],std = [ 1, 1,1] ,max_pixel_value=1)])
+
+    img = Image.fromarray((invTrans(image = image_tensor))['image'].astype(np.uint8))
+    return img
+
+def plot_ground_truth(dataset_output0, dataset_output1):
+
+    img = convert_tensor_to_PIL(dataset_output0)
+    
+    fig, ax = plt.subplots(1,1)
+    #ground_truth = source_val_json["images"][IMG_NAME]["words"]
+    dataset_output1 = dataset_output1.astype(np.int32)
+
+    for points in  dataset_output1:
+    
+        points = points[::-1]
+        points = np.append(points,points[0]).reshape(-1,2)
+        for prev_pos, next_pos in zip(points[:-1], points[1:]):
+            ax.plot( [prev_pos[0], next_pos[0]], [prev_pos[1], next_pos[1]],color='r', linestyle='-', linewidth=1.5)
+    ax.axis("off")
+    ax.imshow(img)
+
+
 class SceneTextDataset(Dataset):
     def __init__(self, root_dir, split='train', image_size=1024, crop_size=512, color_jitter=True,
-                 normalize=True):
+                 normalize=True, to_gray=True, sharpen=True, sobel_probability=0.0):
         with open(osp.join(root_dir, 'ufo/random_split/{}.json'.format(split)), 'r') as f:
             anno = json.load(f)
 
@@ -343,8 +373,31 @@ class SceneTextDataset(Dataset):
         self.image_fnames = sorted(anno['images'].keys())
         self.image_dir = osp.join(root_dir, 'images')
 
+        self.split = split
+
         self.image_size, self.crop_size = image_size, crop_size
         self.color_jitter, self.normalize = color_jitter, normalize
+        self.to_gray = to_gray
+        self.sharpen = sharpen
+        self.sobel_probability = sobel_probability
+
+        funcs = []
+        if self.sharpen:
+            funcs.append(A.Sharpen(p=0.1))
+
+        if self.to_gray:
+            funcs.append(A.ToGray(p=0.01))
+
+        if self.color_jitter:
+            funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25, p=0.5))
+
+        if self.normalize:
+            funcs.append(A.Normalize(mean = (0.485, 0.456, 0.406), std = (0.229, 0.224, 0.225)))
+        
+        self.transform = A.Compose(funcs)
+
+        self.valid_transforms = ComposedTransformation(resize_to=512, normalize=True, mean = (0.485, 0.456, 0.406), std = (0.229, 0.224, 0.225), to_tensor=False)
+
 
     def __len__(self):
         return len(self.image_fnames)
@@ -357,6 +410,7 @@ class SceneTextDataset(Dataset):
         for word_info in self.anno['images'][image_fname]['words'].values():
 
             points = np.array(word_info['points']).flatten()
+            check_point = 0 
 
             # 8개넘어가면 안되게끔, polygon에 외접한 직사각형으로 수정!
             if len(points) > 8 : 
@@ -367,33 +421,44 @@ class SceneTextDataset(Dataset):
                 circum_box= cv2.boxPoints(rect)
                 points = np.array(circum_box).flatten()
 
+            # if check_point == 1: print('postprocess : ', len(points))
             vertices.append(points)
             labels.append(int(not word_info['illegibility']))
+
 
         vertices, labels = np.array(vertices, dtype=np.float32), np.array(labels, dtype=np.int64)
 
         vertices, labels = filter_vertices(vertices, labels, ignore_under=10, drop_under=1)
 
+
         image = Image.open(image_fpath)
-        image, vertices = resize_img(image, vertices, self.image_size)
-        image, vertices = adjust_height(image, vertices)
-        image, vertices = rotate_img(image, vertices)
-        image, vertices = crop_img(image, vertices, labels, self.crop_size)
+
+        if self.split == 'train':
+            image, vertices = resize_img(image, vertices, self.image_size)
+            image, vertices = adjust_height(image, vertices)
+            image, vertices = rotate_img(image, vertices)
+            image, vertices = rand_crop_img(image, vertices, labels, self.crop_size)
+            image, vertices = resize_img(image, vertices, self.crop_size)
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
-            
+        
         image = np.array(image)
 
-        funcs = []
-        if self.color_jitter:
-            funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25))
-        if self.normalize:
-            funcs.append(A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
-        transform = A.Compose(funcs)
-
-        image = transform(image=image)['image']
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
+        
+        if self.split == 'train':
+            if np.random.rand()<self.sobel_probability:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                image = cv2.Sobel(image, cv2.CV_64F, 0,1,ksize=-1)
+            else:
+                image = self.transform(image=image)['image']
+    
+        elif self.split == 'val':
+            composed_transform = self.valid_transforms(image=image, word_bboxes=word_bboxes)
+            image = composed_transform['image']
+            word_bboxes = composed_transform['word_bboxes']
+
         roi_mask = generate_roi_mask(image, vertices, labels)
 
         return image, word_bboxes, roi_mask
