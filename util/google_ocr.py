@@ -4,6 +4,11 @@ import json
 #https://yunwoong.tistory.com/148 참고하여 api key 발급
 os.environ['GOOGLE_APPLICATION_CREDENTIALS']="/opt/ml/ocr_api.json"
 ufo = {}
+images = {}
+
+input_path = '/opt/ml/input/data/aihub/images/'
+output_path = '/opt/ml/input/data/aihub/ufo/train.json'
+f = open("/opt/ml/error_images.txt", 'w')
 
 def make_img_json(vertices, desc):
     word = {}
@@ -39,42 +44,40 @@ def detect_text(dir_path, file_name):
     pages = response.full_text_annotation.pages
 
     words = {}
-    
+    w=h=-1
     for a in pages:
-        size = (a.width, a.height) 
+        w = a.width
+        h = a.height
     
     for i, text in enumerate(texts):
         if i>0 : 
             padding = str(i).zfill(4)
             words[padding] = make_img_json(text.bounding_poly.vertices, text.description)
-            
-        v_list = []
-        for v in text.bounding_poly.vertices:
-            v_list.append((v.x, v.y))
-        v_list.append((text.bounding_poly.vertices[0].x,text.bounding_poly.vertices[0].y))
 
-    
     if response.error.message:
         raise Exception(
             '{}\nFor more info on error messages, check: '
             'https://cloud.google.com/apis/design/errors'.format(
                 response.error.message))
-    return words, size
+    return words, w, h
 
-
-dir_path = '/opt/ml/input/data/boostcamp/tmp/'
-
-images = {}
 try:
-    for i, file in enumerate(os.listdir(dir_path)):
-        words, size = detect_text(dir_path, file)
-        images[file] = {"words":words, "img_w":size[0], "img_h":size[1]}
-        if(i%10==1): print(file)
+    for i, file in enumerate(os.listdir(input_path)):
+        err_file = file
+        words, w, h = detect_text(input_path, file)
+        if w==-1:
+            f.write(file)
+        else:
+            images[file] = {"words":words, "img_w":w, "img_h":h}
+        if(i%10==1): print(i, file)
     ufo["images"] = images
 except Exception as e:
-    print(e)
-    with open("/opt/ml/output.json", 'w') as outfile:
+    print(err_file+ " :::: ", e)
+    ufo["images"] = images
+    with open(output_path, 'w') as outfile:
         json.dump(ufo, outfile)
 
-with open("/opt/ml/output.json", 'w') as outfile:
+with open(output_path, 'w') as outfile:
     json.dump(ufo, outfile)
+
+f.close()
