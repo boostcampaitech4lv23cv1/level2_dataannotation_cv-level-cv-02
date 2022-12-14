@@ -9,12 +9,22 @@ TOKEN_TO_PATH = {
     "aihub"  : "aihub",
     "aihub_small" : "aihub_small" , 
     "aihub_test" : "aihub_test_100",
+<<<<<<< HEAD
     "eng17" : "ICDAR17_English",
     "aihub_easy" : "aihub_final_easy"
     }
 
 DATASETS_TO_USE = ["ko17", "ko19", "eng17", "aihub_easy"]
+=======
+    "aihub_easy" : "aihub_final_easy",
+    "eng17" : "ICDAR17_English"
+    }
 
+DATASETS_TO_USE = ['full17', 'full19', 'camper'] 
+>>>>>>> 4c354e962c83f436cf587972dfbabc449eb3f7ac
+
+## full17, full19 : train dataset
+## camper : val dataset
 
 # Test Experiment시 하단 식으로 세팅을 해주시기 바랍니다.
 # DATASETS_TO_USE = ["ko17", "ko19", "eng17", "aihub_test"]
