@@ -365,7 +365,7 @@ def plot_ground_truth(dataset_output0, dataset_output1):
 
 class SceneTextDataset(Dataset):
     def __init__(self, root_dir, split='train', image_size=1024, crop_size=512, color_jitter=True,
-                 normalize=True, to_gray=True, sharpen=True, clahe=True, sobel_probability=0.0):
+                 normalize=True, to_gray=False, sharpen=False, clahe=False, sobel_probability=0.0):
         with open(osp.join(root_dir, 'ufo/random_split/{}.json'.format(split)), 'r') as f:
             anno = json.load(f)
 
@@ -384,13 +384,13 @@ class SceneTextDataset(Dataset):
 
         funcs = []
         if self.sharpen:
-            funcs.append(A.Sharpen(p=0.2))
+            funcs.append(A.Sharpen(p=0.1))
         
         if self.to_gray:
             funcs.append(A.ToGray(p=0.01))
         
         if self.clahe:
-            funcs.append(A.CLAHE(p=0.2))
+            funcs.append(A.CLAHE(p=0.1))
 
         if self.color_jitter:
             funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25, p=0.5))
