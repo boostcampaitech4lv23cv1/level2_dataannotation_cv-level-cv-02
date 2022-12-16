@@ -2,7 +2,7 @@ import cv2
 import os.path as osp
 import math
 import json
-from PIL import Image
+from PIL import Image, ImageOps
 
 import numpy as np
 import cv2
@@ -10,10 +10,10 @@ import albumentations as A
 from torch.utils.data import Dataset
 from shapely.geometry import Polygon
 
-import random
 import matplotlib.pyplot as plt
 
-from custom_aug import ComposedTransformation
+import warnings
+warnings.filterwarnings('ignore')
 
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
@@ -200,7 +200,55 @@ def crop_img(img, vertices, labels, length):
         region      : cropped image region
         new_vertices: new vertices in cropped region
     '''
-    n = random.choice([0,2,4,6,8,10])
+
+    h, w = img.height, img.width
+    # confirm the shortest side of image >= length
+    if h >= w and w < length:
+        img = img.resize((length, int(h * length / w)), Image.BILINEAR)
+    elif h < w and h < length:
+        img = img.resize((int(w * length / h), length), Image.BILINEAR)
+    ratio_w = img.width / w
+    ratio_h = img.height / h
+    assert(ratio_w >= 1 and ratio_h >= 1)
+
+    new_vertices = np.zeros(vertices.shape)
+    if vertices.size > 0:
+        new_vertices[:,[0,2,4,6]] = vertices[:,[0,2,4,6]] * ratio_w
+        new_vertices[:,[1,3,5,7]] = vertices[:,[1,3,5,7]] * ratio_h
+
+    # find random position
+    remain_h = img.height - length
+    remain_w = img.width - length
+    flag = True
+    cnt = 0
+    while flag and cnt < 1000:
+        cnt += 1
+        start_w = int(np.random.rand() * remain_w)
+        start_h = int(np.random.rand() * remain_h)
+        flag = is_cross_text([start_w, start_h], length, new_vertices[labels==1,:])
+    box = (start_w, start_h, start_w + length, start_h + length)
+    region = img.crop(box)
+    if new_vertices.size == 0:
+        return region, new_vertices
+
+    new_vertices[:,[0,2,4,6]] -= start_w
+    new_vertices[:,[1,3,5,7]] -= start_h
+    return region, new_vertices
+
+
+
+def rand_crop_img(img, vertices, labels, length):
+    '''crop img patches to obtain batch and augment
+    Input:
+        img         : PIL Image
+        vertices    : vertices of text regions <numpy.ndarray, (n,8)>
+        labels      : 1->valid, 0->ignore, <numpy.ndarray, (n,)>
+        length      : length of cropped image region
+    Output:
+        region      : cropped image region
+        new_vertices: new vertices in cropped region
+    '''
+    n = np.random.choice([0,2,4,6,8,10])
     length += n*32
     h, w = img.height, img.width
     # confirm the shortest side of image >= length
@@ -269,6 +317,21 @@ def resize_img(img, vertices, size):
     else:
         img = img.resize((int(w * ratio), size), Image.BILINEAR)
     new_vertices = vertices * ratio
+    return img, new_vertices
+
+
+def resize_square_img(img, vertices, size):
+    h, w = img.height, img.width
+
+    ratio_h = size / h
+    ratio_w = size / w
+
+    img = img.resize((size,size), Image.BILINEAR)
+
+    new_vertices = vertices.copy()
+    new_vertices[:,[1,3,5,7]] = vertices[:,[1,3,5,7]]*ratio_h
+    new_vertices[:,[0,2,4,6]] = vertices[:,[0,2,4,6]]*ratio_w
+
     return img, new_vertices
 
 
@@ -366,7 +429,7 @@ def plot_ground_truth(dataset_output0, dataset_output1):
 
 class SceneTextDataset(Dataset):
     def __init__(self, root_dir, split='train', image_size=1024, crop_size=512, color_jitter=True,
-                 normalize=True):
+                 normalize=True, to_gray=True, sharpen=True, clahe=True, sobel_probability=0.0):
         with open(osp.join(root_dir, 'ufo/random_split/{}.json'.format(split)), 'r') as f:
             anno = json.load(f)
 
@@ -374,30 +437,39 @@ class SceneTextDataset(Dataset):
         self.image_fnames = sorted(anno['images'].keys())
         self.image_dir = osp.join(root_dir, 'images')
 
-        self.image_size, self.crop_size = image_size, crop_size
-        self.color_jitter, self.normalize = color_jitter, normalize
-
         self.split = split
 
-        self.train_transforms = ComposedTransformation(
-            rotate_range=30, crop_aspect_ratio=1.0, crop_size=0.3, hflip=True, vflip=True,
-            random_translate=True, min_image_overlap=0.9, min_bbox_overlap=0.99, min_bbox_count=1,
-            allow_partial_occurrence=True,
-            resize_to=512,
-            max_random_trials=50,
-            brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25,
-            normalize=True, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), to_tensor=False
-        )
+        self.image_size, self.crop_size = image_size, crop_size
+        self.color_jitter, self.normalize = color_jitter, normalize
+        self.to_gray = to_gray
+        self.sharpen = sharpen
+        self.clahe = clahe
+        self.sobel_probability = sobel_probability
 
-        self.valid_transforms = ComposedTransformation(
-            resize_to=512,
-            normalize=True, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), to_tensor=False
-        )
+        funcs = []
+        if self.sharpen:
+            funcs.append(A.Sharpen(p=0.2))
+
+        if self.clahe:
+            funcs.append(A.CLAHE(p=0.2))
+
+        if self.to_gray:
+            funcs.append(A.ToGray(p=0.01))
+
+        if self.color_jitter:
+            funcs.append(A.ColorJitter(0.5, 0.5, 0.5, 0.25, p=0.5))
+
+        if self.normalize:
+            funcs.append(A.Normalize(mean = (0.5, 0.5, 0.5), std = (0.5, 0.5, 0.5)))
+        
+        self.transform = A.Compose(funcs)
 
     def __len__(self):
         return len(self.image_fnames)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, lst):
+        idx, size_factor = lst[0], lst[1]
+
         image_fname = self.image_fnames[idx]
         image_fpath = osp.join(self.image_dir, image_fname)
 
@@ -406,12 +478,6 @@ class SceneTextDataset(Dataset):
 
             points = np.array(word_info['points']).flatten()
             check_point = 0 
-            # if len(points) > 8:
-            #     check_point = 1
-            #     print('*********')
-            #     print(image_fname)
-            #     print('len(points):',len(points))
-            #     print('word_info', len(word_info['points']))
 
             # 8개넘어가면 안되게끔, polygon에 외접한 직사각형으로 수정!
             if len(points) > 8 : 
@@ -426,36 +492,39 @@ class SceneTextDataset(Dataset):
             vertices.append(points)
             labels.append(int(not word_info['illegibility']))
 
-
         vertices, labels = np.array(vertices, dtype=np.float32), np.array(labels, dtype=np.int64)
 
         vertices, labels = filter_vertices(vertices, labels, ignore_under=10, drop_under=1)
 
-
         image = Image.open(image_fpath)
-        #image, vertices = resize_img(image, vertices, self.image_size)
-        #image, vertices = adjust_height(image, vertices)
-        #image, vertices = rotate_img(image, vertices)
-        #image, vertices = crop_img(image, vertices, labels, self.crop_size)
 
+        if self.split == 'train':
+            image, vertices = resize_img(image, vertices, self.image_size)
+            image, vertices = adjust_height(image, vertices)
+            image, vertices = rotate_img(image, vertices,10)
+            image, vertices = crop_img(image,vertices,labels,self.crop_size+(32*size_factor))
+            #image, vertices = rand_crop_img(image, vertices, labels, self.crop_size)
+            #image, vertices = resize_img(image, vertices, self.crop_size)
+
+        elif self.split == 'val':
+            image, vertices = resize_square_img(image, vertices, self.crop_size)
 
         if image.mode != 'RGB':
             image = image.convert('RGB')
-            
+        
         image = np.array(image)
 
         word_bboxes = np.reshape(vertices, (-1, 4, 2))
-
+        
         if self.split == 'train':
-            ## ComposedTransformation 적용    
-            composed_transform = self.train_transforms(image=image, word_bboxes=word_bboxes)
-            image = composed_transform['image']
-            word_bboxes = composed_transform['word_bboxes']
-
+            if np.random.rand()<self.sobel_probability:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                image = cv2.Sobel(image, cv2.CV_64F, 0,1,ksize=-1)
+            else:
+                image = self.transform(image=image)['image']
+    
         elif self.split == 'val':
-            composed_transform = self.valid_transforms(image=image, word_bboxes=word_bboxes)
-            image = composed_transform['image']
-            word_bboxes = composed_transform['word_bboxes']
+            image = A.Normalize(mean = (0.5, 0.5, 0.5), std = (0.5, 0.5, 0.5))(image = image)['image']
 
         roi_mask = generate_roi_mask(image, vertices, labels)
 

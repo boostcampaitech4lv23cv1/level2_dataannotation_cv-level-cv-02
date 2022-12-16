@@ -144,8 +144,11 @@ def do_training(data_dir, model_dir,
         val_data_stack.append(sub_val_dataset)
 
     # ConcatDataset을 통해 다 합쳐준다.
+    
     train_dataset = ConcatDataset(train_data_stack)
     val_dataset = ConcatDataset(val_data_stack)
+    #train_dataset = sub_train_dataset
+    #val_dataset = sub_val_dataset
 
     train_num_batches = math.ceil(len(train_dataset) / batch_size)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
@@ -165,7 +168,8 @@ def do_training(data_dir, model_dir,
         print("Load complete")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+    #scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=start_early_stopping, eta_min=learning_rate*0.3)
 
     # optimizer = torch.optim.Adam(model.parameters(), lr= 1e-4)
     # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0 = 10, T_mult= 2 , eta_max =0.05, T_up = 2, gamma = 0.5)
@@ -173,7 +177,7 @@ def do_training(data_dir, model_dir,
     
 
     model.train()
-
+    cnt = 0
     for epoch in range(max_epoch): #---------------------------------start epoch--------------
         current_lr = scheduler.get_lr()[0]
         model.train()
@@ -181,10 +185,11 @@ def do_training(data_dir, model_dir,
         with tqdm(total=train_num_batches) as pbar:
             for img, gt_score_map, gt_geo_map, roi_mask in train_loader: #---------------start batch------------
 
-                if epoch == 0 :
-                    for i in range(5):
+                if epoch == 0 and cnt == 0:
+                    for i in range(10):
                         pilimg = ToPILImage()(img[i])
                         pilimg.save(f'sample{i}.png', 'png') #######
+                    cnt+=1
                 
                 pbar.set_description('[Epoch {}]'.format(epoch + 1))
 
@@ -203,15 +208,16 @@ def do_training(data_dir, model_dir,
                 pbar.update(1)
 
                 val_dict = {
-                        'Train Cls loss': extra_info['cls_loss'], 'Train Angle loss': extra_info['angle_loss'],
-                        'Train IoU loss': extra_info['iou_loss'] , "learning_rate" : current_lr
+                        'T C loss': extra_info['cls_loss'], 'T A loss': extra_info['angle_loss'],
+                        'T I loss': extra_info['iou_loss'] , "lr" : current_lr
                     }
                 wandb.log(val_dict)
+                val_dict['size'] = img.shape[-1]
                 pbar.set_postfix(val_dict) #----------------end batch---------------------------------
 
         scheduler.step()
 
-        print('Training Mean loss: {:.4f} | Elapsed time: {}'.format(
+        print('T M loss: {:.4f} | Elapsed time: {}'.format(
                 train_epoch_loss / train_num_batches, timedelta(seconds=time.time() - epoch_start)))
        
         wandb.log({"Train_loss" : train_epoch_loss / train_num_batches})
@@ -317,7 +323,7 @@ def do_training(data_dir, model_dir,
         wandb.log({"recall" : recall})
         wandb.log({"F1_score" : hmean})
 
-        # save_interval마다, 상위 10개에 대해 Loss sample을 분석!
+        # save_interval마다, 상위 30개에 대해 Loss sample을 분석!
         if (epoch +1) % save_interval == 0 : 
             EVAL_BATCH_SIZE = 1
             eval_num_batches = len(val_dataset)
@@ -347,12 +353,12 @@ def do_training(data_dir, model_dir,
                         eval_losses.append((loss_val, val_idx)) 
                         pbar.set_postfix(eval_dict)
 
-            random_losses = random.sample(eval_losses, 10)
-            eval_losses = sorted(eval_losses, key = lambda x: -x[0])[:10]
+            random_losses = random.sample(eval_losses, 30)
+            eval_losses = sorted(eval_losses, key = lambda x: -x[0])[:30]
             top_loss_table = make_wandb_table(model, eval_losses)
             random_loss_table = make_wandb_table(model, random_losses)
 
-            wandb.log({"TOP Loss10" : top_loss_table})
+            wandb.log({"TOP Loss30" : top_loss_table})
             wandb.log({"Random Loss" : random_loss_table})
             
         #끝났으니 다시 원래대로

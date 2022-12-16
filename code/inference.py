@@ -25,8 +25,8 @@ def parse_args():
     parser.add_argument('--output_dir', default=os.environ.get('SM_OUTPUT_DATA_DIR', 'predictions'))
 
     parser.add_argument('--device', default='cuda' if cuda.is_available() else 'cpu')
-    parser.add_argument('--input_size', type=int, default=1024)
-    parser.add_argument('--batch_size', type=int, default=20)
+    parser.add_argument('--input_size', type=int, default=1280)
+    parser.add_argument('--batch_size', type=int, default=8)
 
     args = parser.parse_args()
 
@@ -83,7 +83,7 @@ def main(args):
     model = EAST(pretrained=False).to(args.device)
 
     # Get paths to checkpoint files
-    ckpt_fpath = osp.join(args.model_dir, 'latest.pth')
+    ckpt_fpath = osp.join(args.model_dir, 'best.pth')
 
     if not osp.exists(args.output_dir):
         os.makedirs(args.output_dir)

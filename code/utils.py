@@ -7,6 +7,7 @@ import os.path as osp
 from detect import detect 
 import re
 from typing import List, Tuple, Dict
+import PIL
 
 from base import TOKEN_TO_PATH, DATASETS_TO_USE
 from torch.optim.lr_scheduler import _LRScheduler
@@ -118,7 +119,8 @@ def make_wandb_table(model, losses):
             source_val_json = json.load(f)
 
         #LIST가 중요함.
-        img = [cv2.imread(osp.join(SOURCE_IMG_PATH, file_name))[:, :, ::-1]]
+        #img = [cv2.imread(osp.join(SOURCE_IMG_PATH, file_name))[:, :, ::-1]]
+        img = [np.asarray(PIL.Image.open(osp.join(SOURCE_IMG_PATH, file_name)))]
 
         fig, ax = plt.subplots(1,1)
         model.eval()
